@@ -1,53 +1,89 @@
 #!/bin/bash
 
-set -eu
-# Source app helpers
+#=================================================
+# GENERIC START
+#=================================================
+# IMPORT GENERIC HELPERS
+#=================================================
+
+source _common.sh
 source /usr/share/yunohost/helpers
-source ./_common
+
+#=================================================
+# LOAD SETTINGS
+#=================================================
 
 app=$YNH_APP_INSTANCE_NAME
 
 domain=$(ynh_app_setting_get $app domain)
 path=$(ynh_app_setting_get $app path)
 is_public=$(ynh_app_setting_get $app is_public)
+final_path=$(ynh_app_setting_get $app final_path)
 
-# Remove trailing "/" for next commands
-if [[ ! "$path" == "/" ]]; then
-    path=${path%/}
+#=================================================
+# ENSURE DOWNWARD COMPATIBILITY
+#=================================================
+
+if [ "$is_public" = "Yes" ]; then
+	ynh_app_setting_set $app is_public 1	# Fix is_public as a boolean value
+	is_public=1
+elif [ "$is_public" = "No" ]; then
+	ynh_app_setting_set $app is_public 0
+	is_public=0
 fi
 
-final_path=/var/www/$app
-sudo mkdir /var/www/.shuri
-sudo mv $final_path/db/ /var/www/.shuri
 
-# Copy files to the right place
-sudo git clone https://github.com/pips-/shuri.git $final_path
-pushd $final_path
-sudo php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
-sudo php -r "if (hash_file('SHA384', 'composer-setup.php') === '669656bab3166a7aff8a7506b8cb2d1c292f042046c5a994c43155c0be6190fa0355160742ab2e1c88d40d5be660b410') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;"
-sudo php composer-setup.php
-sudo php -r "unlink('composer-setup.php');"
-sudo ./composer.phar install
-sudo mv /var/www/.shuri .
-popd
+#=================================================
+# CHECK THE PATH
+#=================================================
+
+# Normalize the URL path syntax
+path=$(ynh_normalize_url_path $path_url)
+
+#=================================================
+# STANDARD UPGRADE STEPS
+#=================================================
+# DOWNLOAD, CHECK AND UNPACK SOURCE
+#=================================================
+
+# Download, check integrity, uncompress and patch the source from app.src
+ynh_setup_source "$final_path"
+
+#=================================================
+# NGINX CONFIGURATION
+#=================================================
+
+# Create a dedicated nginx config
+ynh_add_nginx_config
+
+#=================================================
+# GENERIC FINALIZATION
+#=================================================
+# SECURE FILES AND DIRECTORIES
+#=================================================
+
 
 # Files owned by root, www-data can just read
 sudo chown www-data:www-data $final_path -R
 sudo chmod 755 $final_path -R
 
-# Modify Nginx configuration file and copy it to Nginx conf directory
-sed -i "s@YNH_WWW_PATH@$path@g" ../conf/nginx.conf
-sed -i "s@YNH_WWW_ALIAS@$final_path/@g" ../conf/nginx.conf
-nginxconf=/etc/nginx/conf.d/$domain.d/$app.conf
-sudo cp ../conf/nginx.conf $nginxconf
-sudo chown root: $nginxconf
-sudo chmod 600 $nginxconf
+#=================================================
+# SETUP SSOWAT
+#=================================================
 
-ynh_app_setting_set "$app" is_public "$is_public"
-if [ "$is_public" = "Yes" ];
+if [ $is_public -eq 0 ]
+then	# Remove the public access
+	ynh_app_setting_delete $app skipped_uris
+fi
+# Make app public if necessary
+if [ $is_public -eq 1 ]
 then
-  ynh_app_setting_set "$app" unprotected_uris "/"
+	# unprotected_uris allows SSO credentials to be passed anyway
+	ynh_app_setting_set $app unprotected_uris "/"
 fi
 
-sudo service nginx reload
-sudo yunohost app ssowatconf
+#=================================================
+# RELOAD NGINX
+#=================================================
+
+systemctl reload nginx
