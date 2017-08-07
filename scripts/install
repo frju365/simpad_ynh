@@ -2,7 +2,7 @@
 
 # Source app helpers
 source /usr/share/yunohost/helpers
-source .fonctions
+source _common.sh
 set -eu
 
 # Retrieve arguments
