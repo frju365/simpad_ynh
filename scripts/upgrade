@@ -40,6 +40,11 @@ fi
 # Normalize the URL path syntax
 path=$(ynh_normalize_url_path $path_url)
 
+# Verify the checksum and backup the file if it's different
+ynh_backup_if_checksum_is_different "$final_path/config/config.php"
+# Recalculate and store the config file checksum into the app settings
+ynh_store_file_checksum "$final_path/config/config.php"
+
 #=================================================
 # STANDARD UPGRADE STEPS
 #=================================================
@@ -48,6 +53,8 @@ path=$(ynh_normalize_url_path $path_url)
 
 # Download, check integrity, uncompress and patch the source from app.src
 ynh_setup_source "$final_path"
+
+sudo rm -rf $final_path/config/config.php
 
 #=================================================
 # NGINX CONFIGURATION
